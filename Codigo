@@ -1,11 +1,14 @@
+//Bibliotecas ultilizadas
+
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <DHTesp.h>
 #include <PubSubClient.h>
+#include <ESP32Servo.h>
 
-// Configurações de WiFi
+//configurações do Wifi
 const char *SSID = "Wokwi-GUEST";
-const char *PASSWORD = "123456"; 
+const char *PASSWORD = "";  // Substitua pela sua senha
 
 // Configurações de MQTT
 const char *BROKER_MQTT = "broker.hivemq.com";
@@ -13,17 +16,27 @@ const int BROKER_PORT = 1883;
 const char *ID_MQTT = "Acqua_mqtt";
 const char *TOPIC_SUBSCRIBE_LED = "fiap/iot/led";
 const char *TOPIC_PUBLISH_TEMP_HUMI = "fiap/iot/temphumi";
+const char *TOPIC_SUBSCRIBE_SERVO1 = "fiap/iot/servo1";
 
-
-#define PUBLISH_DELAY 2000
+// Configurações de Hardware
 #define PIN_DHT 12
+#define PIN_LED 33
+#define PIN_SERVO1 27 
+#define PUBLISH_DELAY 2000
+
+// Variáveis globais
 WiFiClient espClient;
 PubSubClient MQTT(espClient);
 DHTesp dht;
+Servo servo1;
 unsigned long publishUpdate = 0;
 TempAndHumidity sensorValues;
 const int TAMANHO = 200;
 
+// Variável para controlar o estado do LED
+bool ledState = false;
+
+// Protótipos de funções
 void updateSensorValues();
 void initWiFi();
 void initMQTT();
@@ -67,11 +80,27 @@ void callbackMQTT(char *topic, byte *payload, unsigned int length) {
     int valor = atoi(msg.c_str());
 
     if (valor == 1) {
-      digitalWrite(PIN_LED, HIGH);
-      Serial.println("LED ligado via comando MQTT");
+      if (sensorValues.humidity < 30) {
+        digitalWrite(PIN_LED, HIGH);
+        ledState = true;
+        Serial.println("LED ligado via comando MQTT");
+      } else {
+        Serial.println("Umidade abaixo de 30%, o LED foi ligado.");
+      }
     } else if (valor == 0) {
       digitalWrite(PIN_LED, LOW);
+      ledState = false;
       Serial.println("LED desligado via comando MQTT");
+    }
+  }
+
+  if (ledState && strcmp(topic, TOPIC_SUBSCRIBE_SERVO1) == 0) {
+    int angle = atoi(msg.c_str());
+    if (angle >= 0 && angle <= 180) {
+      servo1.write(angle);
+      Serial.printf("Servo 1 movido para o ângulo %d\n", angle);
+    } else {
+      Serial.println("Ângulo fora do intervalo válido (0-180) para o Servo 1");
     }
   }
 }
@@ -84,6 +113,7 @@ void reconnectMQTT() {
     if (MQTT.connect(ID_MQTT)) {
       Serial.println("Conectado ao broker MQTT!");
       MQTT.subscribe(TOPIC_SUBSCRIBE_LED);
+      MQTT.subscribe(TOPIC_SUBSCRIBE_SERVO1);
     } else {
       Serial.println("Falha na conexão com MQTT. Tentando novamente em 2 segundos.");
       delay(2000);
@@ -100,7 +130,7 @@ void reconnectWiFi(void) {
   if (WiFi.status() == WL_CONNECTED)
     return;
 
-  WiFi.begin(SSID, PASSWORD);
+  WiFi.begin(SSID, PASSWORD); // Conecta na rede WI-FI
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(100);
@@ -117,11 +147,13 @@ void reconnectWiFi(void) {
 void setup() {
   Serial.begin(115200);
 
+  initWiFi();
+  initMQTT();
+  servo1.attach(PIN_SERVO1);
+
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LOW);
   dht.setup(PIN_DHT, DHTesp::DHT22);
-  initWiFi();
-  initMQTT();
 }
 
 void loop() {
@@ -144,4 +176,3 @@ void loop() {
     }
   }
 }
-
